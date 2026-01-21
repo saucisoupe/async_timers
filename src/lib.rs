@@ -12,8 +12,10 @@ const MS_BUCKETS: usize = 10; //100ms
 const S_BUCKETS: usize = 60;
 const H_BUCKETS: usize = 24;
 const MAX_DURATION_HOURS: u64 = 24;
-
 const SMALLVEC_SIZE: usize = 8;
+
+type TimerId = usize;
+type Bucket = SmallVec<[TimerId; SMALLVEC_SIZE]>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DurationTooLong;
@@ -79,8 +81,6 @@ impl Bitset<u64> {
         (self.0 & (1 << idx)) != 0
     }
 }
-
-type Bucket = SmallVec<[usize; SMALLVEC_SIZE]>; // stores timer_id
 
 struct BucketLevels {
     ms_level: [Bucket; MS_BUCKETS],
@@ -230,7 +230,6 @@ impl TimeWheel {
 
     /// returns the duration until the next timer is triggered, or None if no timers are registered.
     pub fn next_deadline(&self) -> Option<Duration> {
-        // Check ms level first (closest timers)
         for i in 0..MS_BUCKETS {
             let idx = (self.current_ms_idx + i) % MS_BUCKETS;
             if self.buckets.ms_occupied.is_set(idx) {
