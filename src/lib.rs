@@ -134,9 +134,7 @@ impl TimeWheel {
             self.buckets.ms_occupied.clear(self.current_ms_idx);
 
             for timer_id in self.buckets.ms_level[self.current_ms_idx].drain(..) {
-                if let Some(timer) = self.storage.take(timer_id) {
-                    timer.wake();
-                }
+                self.storage.wake(timer_id);
             }
         }
 
@@ -192,7 +190,11 @@ impl TimeWheel {
         (self.current_h_idx + hours.min(H_BUCKETS - 1)) % H_BUCKETS
     }
 
-    pub fn register_timer(
+    pub fn poll(&mut self, id: usize, waker: &Waker) -> std::task::Poll<()> {
+        self.storage.poll(id, waker)
+    }
+
+    pub fn init_timer(
         &mut self,
         duration: Duration,
         waker: &Waker,
@@ -202,7 +204,7 @@ impl TimeWheel {
             return Err(DurationTooLong);
         }
 
-        let timer_id = self.storage.insert(waker);
+        let timer_id = self.storage.create(waker);
 
         let ms_threshold = (MS_BUCKETS as u64) * MS_TICK;
         let s_threshold = (S_BUCKETS as u64) * 1000;
@@ -224,8 +226,8 @@ impl TimeWheel {
         Ok(timer_id)
     }
 
-    pub fn cancel_timer(&mut self, id: usize) {
-        self.storage.cancel(id);
+    pub fn drop(&mut self, id: usize) {
+        self.storage.drop(id);
     }
 
     /// returns the duration until the next timer is triggered, or None if no timers are registered.

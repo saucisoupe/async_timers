@@ -5,46 +5,54 @@ pub struct TimerStorage {
     inner: slab::Slab<Timer>,
 }
 
-#[derive(Debug)]
-pub struct Timer {
-    inner: Option<Waker>,
-}
-
-impl Timer {
-    fn cancel(&mut self) {
-        let _ = self.inner.take();
-    }
-
-    pub fn wake(self) {
-        if let Some(waker) = self.inner {
-            waker.wake();
-        }
-    }
-}
-
-impl From<Waker> for Timer {
-    fn from(value: Waker) -> Self {
-        Self { inner: Some(value) }
-    }
+enum Timer {
+    Waiting(Waker),
+    Done,
+    Cancelled,
 }
 
 impl TimerStorage {
-    pub(crate) fn insert(&mut self, waker: &Waker) -> usize {
-        self.inner.insert(Timer::from(waker.clone()))
+    pub(crate) fn create(&mut self, waker: &Waker) -> usize {
+        self.inner.insert(Timer::Waiting(waker.clone()))
     }
 
-    ///this time won't wake up anything
-    pub(crate) fn cancel(&mut self, id: usize) {
-        unsafe { self.inner.get_unchecked_mut(id).cancel() }
+    pub(crate) fn drop(&mut self, id: usize) {
+        let timer = unsafe { self.inner.get_unchecked_mut(id) };
+        match timer {
+            Timer::Waiting(_) => {
+                *timer = Timer::Cancelled;
+                return;
+            }
+            Timer::Done => {}
+            Timer::Cancelled => return,
+        }
+        self.inner.remove(id);
+    }
+
+    pub(crate) fn poll(&mut self, id: usize, waker: &Waker) -> std::task::Poll<()> {
+        let timers = unsafe { self.inner.get_unchecked_mut(id) };
+        if let Timer::Waiting(r_waker) = timers {
+            if !r_waker.will_wake(waker) {
+                *r_waker = waker.clone();
+            }
+            return std::task::Poll::Pending;
+        }
+        self.inner.remove(id);
+        std::task::Poll::Ready(())
     }
 
     /// Takes the timer out of storage, returns None if it was cancelled
-    pub(crate) fn take(&mut self, id: usize) -> Option<Timer> {
-        let timer = self.inner.remove(id);
-        if timer.inner.is_some() {
-            Some(timer)
-        } else {
-            None
+    pub(crate) fn wake(&mut self, id: usize) {
+        let timer = unsafe { self.inner.get_unchecked_mut(id) };
+        match timer {
+            Timer::Waiting(waker) => {
+                waker.wake_by_ref();
+                *timer = Timer::Done;
+                return;
+            }
+            Timer::Done => unreachable!(),
+            Timer::Cancelled => {}
         }
+        self.inner.remove(id);
     }
 }
