@@ -244,7 +244,7 @@ impl TimeWheel {
             let idx = (self.current_s_idx + i) % S_BUCKETS;
             if self.buckets.s_occupied.is_set(idx) {
                 let ms_remaining = (MS_BUCKETS - self.current_ms_idx) * MS_TICK as usize;
-                let s_remaining = if i == 0 { 0 } else { i - 1 } * 1000;
+                let s_remaining = i * 1000;
                 return Some(Duration::from_millis((ms_remaining + s_remaining) as u64));
             }
         }
@@ -254,7 +254,7 @@ impl TimeWheel {
             if self.buckets.h_occupied.is_set(idx) {
                 let ms_remaining = (MS_BUCKETS - self.current_ms_idx) * MS_TICK as usize;
                 let s_remaining = (S_BUCKETS - self.current_s_idx - 1) * 1000;
-                let h_remaining = if i == 0 { 0 } else { i - 1 } * 3600 * 1000;
+                let h_remaining = i * 3600 * 1000;
                 return Some(Duration::from_millis(
                     (ms_remaining + s_remaining + h_remaining) as u64,
                 ));
