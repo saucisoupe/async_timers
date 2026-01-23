@@ -8,7 +8,7 @@ use std::{
 mod slab;
 
 const MS_TICK: u64 = 10; //10ms
-const MS_BUCKETS: usize = 10; //100ms
+const MS_BUCKETS: usize = 20; //200ms
 const S_BUCKETS: usize = 60;
 const H_BUCKETS: usize = 24;
 const MAX_DURATION_HOURS: u64 = 24;
@@ -86,7 +86,7 @@ struct BucketLevels {
     ms_level: [Bucket; MS_BUCKETS],
     s_level: [Bucket; S_BUCKETS],
     h_level: [Bucket; H_BUCKETS],
-    ms_occupied: Bitset<u16>,
+    ms_occupied: Bitset<u32>,
     s_occupied: Bitset<u64>,
     h_occupied: Bitset<u32>,
 }

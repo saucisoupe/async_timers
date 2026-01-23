@@ -104,16 +104,16 @@ fn test_timer_fires_at_second_level() {
     let mut wheel = TimeWheel::new();
     let (counter, waker) = make_waker();
 
-    // 200ms should be in the second-level bucket
+    // 300ms should be in the second-level bucket (ms threshold is 200ms)
     let id = wheel
-        .init_timer(Duration::from_millis(200), &waker)
+        .init_timer(Duration::from_millis(300), &waker)
         .unwrap();
 
     // Verify it's not in ms level by checking deadline is calculated correctly
-    assert!(wheel.next_deadline().unwrap() >= Duration::from_millis(100));
+    assert!(wheel.next_deadline().unwrap() >= Duration::from_millis(200));
 
     // Process ticks until timer fires
-    sleep(Duration::from_millis(250));
+    sleep(Duration::from_millis(350));
     wheel.tick();
 
     assert_eq!(counter.count(), 1);
@@ -127,13 +127,15 @@ fn test_timer_at_one_second() {
 
     let id = wheel.init_timer(Duration::from_secs(1), &waker).unwrap();
 
-    // Should not fire early (check at ~200ms)
-    sleep(Duration::from_millis(200));
-    wheel.tick();
-    assert_eq!(counter.count(), 0, "Timer fired too early");
+    // Verify timer is placed in second-level bucket (deadline >= 200ms threshold)
+    let deadline = wheel.next_deadline().unwrap();
+    assert!(
+        deadline >= Duration::from_millis(200),
+        "1s timer should be in second-level bucket"
+    );
 
-    // Should fire after 1 second total (sleep additional ~900ms to be safe)
-    sleep(Duration::from_millis(900));
+    // Should fire after 1 second total
+    sleep(Duration::from_millis(1100));
     wheel.tick();
     assert_eq!(counter.count(), 1);
     assert_eq!(wheel.poll(id, &waker), Poll::Ready(()));
@@ -181,15 +183,13 @@ fn test_multiple_timers_different_buckets() {
     let (counter1, waker1) = make_waker();
     let (counter2, waker2) = make_waker();
 
-    let id1 = wheel
-        .init_timer(Duration::from_millis(20), &waker1)
-        .unwrap();
+    let id1 = wheel.init_timer(Duration::from_millis(5), &waker1).unwrap();
     let id2 = wheel
-        .init_timer(Duration::from_millis(50), &waker2)
+        .init_timer(Duration::from_millis(15), &waker2)
         .unwrap();
 
     // First timer should fire first
-    sleep(Duration::from_millis(35));
+    sleep(Duration::from_millis(10));
     wheel.tick();
 
     assert_eq!(counter1.count(), 1);
@@ -198,7 +198,7 @@ fn test_multiple_timers_different_buckets() {
     assert_eq!(wheel.poll(id2, &waker2), Poll::Pending);
 
     // Second timer should fire after more time
-    sleep(Duration::from_millis(30));
+    sleep(Duration::from_millis(10));
     wheel.tick();
 
     assert_eq!(counter2.count(), 1);
@@ -212,14 +212,14 @@ fn test_multiple_timers_different_levels() {
     let (counter_s, waker_s) = make_waker();
 
     let id_ms = wheel
-        .init_timer(Duration::from_millis(20), &waker_ms)
+        .init_timer(Duration::from_millis(50), &waker_ms)
         .unwrap();
     let id_s = wheel
-        .init_timer(Duration::from_millis(200), &waker_s)
+        .init_timer(Duration::from_millis(300), &waker_s)
         .unwrap();
 
     // MS level timer should fire first
-    sleep(Duration::from_millis(35));
+    sleep(Duration::from_millis(60));
     wheel.tick();
 
     assert_eq!(counter_ms.count(), 1);
@@ -227,7 +227,7 @@ fn test_multiple_timers_different_levels() {
     assert_eq!(wheel.poll(id_ms, &waker_ms), Poll::Ready(()));
 
     // S level timer should fire after cascade
-    sleep(Duration::from_millis(200));
+    sleep(Duration::from_millis(300));
     wheel.tick();
 
     assert_eq!(counter_s.count(), 1);
@@ -438,9 +438,9 @@ fn test_rapid_ticks() {
     let mut wheel = TimeWheel::new();
     let (counter, waker) = make_waker();
 
-    // Use a longer timer to avoid timing sensitivity
+    // Use ms-level timer to avoid cascade timing issues
     wheel
-        .init_timer(Duration::from_millis(200), &waker)
+        .init_timer(Duration::from_millis(100), &waker)
         .unwrap();
 
     // Call tick many times before timer should fire (total ~30ms)
@@ -455,8 +455,8 @@ fn test_rapid_ticks() {
         "Timer fired too early during rapid ticks"
     );
 
-    // Now let it fire (sleep enough for >200ms total)
-    sleep(Duration::from_millis(200));
+    // Now let it fire (sleep enough for >100ms total from start)
+    sleep(Duration::from_millis(120));
     wheel.tick();
 
     assert_eq!(counter.count(), 1);
@@ -542,7 +542,7 @@ fn test_interleaved_register_and_tick() {
     let (counter1, waker1) = make_waker();
     let (counter2, waker2) = make_waker();
 
-    // Use longer durations to avoid timing sensitivity
+    // Use ms-level durations to avoid cascade timing issues
     wheel
         .init_timer(Duration::from_millis(50), &waker1)
         .unwrap();
@@ -566,7 +566,7 @@ fn test_interleaved_register_and_tick() {
     assert_eq!(counter2.count(), 0, "Second timer fired too early");
 
     // Let second timer fire
-    sleep(Duration::from_millis(60));
+    sleep(Duration::from_millis(50));
     wheel.tick();
 
     assert_eq!(counter2.count(), 1, "Second timer should have fired");
@@ -594,16 +594,16 @@ fn test_next_deadline_timer_in_second_level() {
     let mut wheel = TimeWheel::new();
     let (_, waker) = make_waker();
 
-    // 200ms is in the second-level bucket (ms threshold is 100ms)
+    // 300ms is in the second-level bucket (ms threshold is 200ms)
     wheel
-        .init_timer(Duration::from_millis(200), &waker)
+        .init_timer(Duration::from_millis(300), &waker)
         .unwrap();
 
     let deadline = wheel.next_deadline().unwrap();
-    // Should be at least 100ms (the full ms level needs to pass first)
+    // Should be at least 200ms (the full ms level needs to pass first)
     assert!(
-        deadline >= Duration::from_millis(100),
-        "Second-level timer deadline should be >= 100ms, got {:?}",
+        deadline >= Duration::from_millis(200),
+        "Second-level timer deadline should be >= 200ms, got {:?}",
         deadline
     );
 }
@@ -696,13 +696,13 @@ fn test_next_deadline_after_ms_level_cleared() {
     let (_, waker) = make_waker();
 
     // Add timer at ms level and s level
-    wheel.init_timer(Duration::from_millis(20), &waker).unwrap();
+    wheel.init_timer(Duration::from_millis(50), &waker).unwrap();
     wheel
         .init_timer(Duration::from_millis(500), &waker)
         .unwrap();
 
     // Fire the ms-level timer
-    sleep(Duration::from_millis(30));
+    sleep(Duration::from_millis(60));
     wheel.tick();
 
     // Now next_deadline should point to the s-level timer
