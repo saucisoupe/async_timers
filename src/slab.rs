@@ -30,8 +30,10 @@ impl TimerStorage {
     }
 
     pub(crate) fn poll(&mut self, id: usize, waker: &Waker) -> std::task::Poll<()> {
-        let timers = unsafe { self.inner.get_mut(id).unwrap() };
+        println!("polling!");
+        let timers = self.inner.get_mut(id).unwrap();
         if let Timer::Waiting(r_waker) = timers {
+            println!("waking");
             if !r_waker.will_wake(waker) {
                 *r_waker = waker.clone();
             }
