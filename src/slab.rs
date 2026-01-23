@@ -17,7 +17,7 @@ impl TimerStorage {
     }
 
     pub(crate) fn drop(&mut self, id: usize) {
-        let timer = unsafe { self.inner.get_unchecked_mut(id) };
+        let timer = unsafe { self.inner.get_mut(id).unwrap() };
         match timer {
             Timer::Waiting(_) => {
                 *timer = Timer::Cancelled;
@@ -30,7 +30,7 @@ impl TimerStorage {
     }
 
     pub(crate) fn poll(&mut self, id: usize, waker: &Waker) -> std::task::Poll<()> {
-        let timers = unsafe { self.inner.get_unchecked_mut(id) };
+        let timers = unsafe { self.inner.get_mut(id).unwrap() };
         if let Timer::Waiting(r_waker) = timers {
             if !r_waker.will_wake(waker) {
                 *r_waker = waker.clone();
@@ -43,7 +43,7 @@ impl TimerStorage {
 
     /// Takes the timer out of storage, returns None if it was cancelled
     pub(crate) fn wake(&mut self, id: usize) {
-        let timer = unsafe { self.inner.get_unchecked_mut(id) };
+        let timer = unsafe { self.inner.get_mut(id).unwrap() };
         match timer {
             Timer::Waiting(waker) => {
                 waker.wake_by_ref();
