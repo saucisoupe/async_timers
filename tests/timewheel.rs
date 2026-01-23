@@ -571,3 +571,200 @@ fn test_interleaved_register_and_tick() {
 
     assert_eq!(counter2.count(), 1, "Second timer should have fired");
 }
+
+// ============================================================================
+// next_deadline tests
+// ============================================================================
+
+#[test]
+fn test_next_deadline_zero_duration_timer() {
+    let mut wheel = TimeWheel::new();
+    let (_, waker) = make_waker();
+
+    // Zero duration timer goes into current bucket
+    wheel.init_timer(Duration::ZERO, &waker).unwrap();
+
+    // Timer at current bucket (offset 0) should return None per the implementation
+    let deadline = wheel.next_deadline();
+    assert_eq!(deadline, None, "Zero-offset timer should return None");
+}
+
+#[test]
+fn test_next_deadline_timer_in_second_level() {
+    let mut wheel = TimeWheel::new();
+    let (_, waker) = make_waker();
+
+    // 200ms is in the second-level bucket (ms threshold is 100ms)
+    wheel
+        .init_timer(Duration::from_millis(200), &waker)
+        .unwrap();
+
+    let deadline = wheel.next_deadline().unwrap();
+    // Should be at least 100ms (the full ms level needs to pass first)
+    assert!(
+        deadline >= Duration::from_millis(100),
+        "Second-level timer deadline should be >= 100ms, got {:?}",
+        deadline
+    );
+}
+
+#[test]
+fn test_next_deadline_timer_in_hour_level() {
+    let mut wheel = TimeWheel::new();
+    let (_, waker) = make_waker();
+
+    // 2 hours is in the hour-level bucket
+    wheel.init_timer(Duration::from_secs(7200), &waker).unwrap();
+
+    let deadline = wheel.next_deadline().unwrap();
+    // Should be at least 60 seconds (full ms + s levels need to cascade)
+    assert!(
+        deadline >= Duration::from_secs(60),
+        "Hour-level timer deadline should be >= 60s, got {:?}",
+        deadline
+    );
+}
+
+#[test]
+fn test_next_deadline_prefers_ms_over_s_level() {
+    let mut wheel = TimeWheel::new();
+    let (_, waker) = make_waker();
+
+    // First add a second-level timer
+    wheel
+        .init_timer(Duration::from_millis(200), &waker)
+        .unwrap();
+
+    // Then add a ms-level timer
+    wheel.init_timer(Duration::from_millis(30), &waker).unwrap();
+
+    let deadline = wheel.next_deadline().unwrap();
+    // Should return the ms-level timer (sooner)
+    assert!(
+        deadline <= Duration::from_millis(40),
+        "Should return ms-level timer deadline, got {:?}",
+        deadline
+    );
+}
+
+#[test]
+fn test_next_deadline_prefers_s_over_h_level() {
+    let mut wheel = TimeWheel::new();
+    let (_, waker) = make_waker();
+
+    // First add an hour-level timer
+    wheel.init_timer(Duration::from_secs(7200), &waker).unwrap();
+
+    // Then add a second-level timer
+    wheel
+        .init_timer(Duration::from_millis(500), &waker)
+        .unwrap();
+
+    let deadline = wheel.next_deadline().unwrap();
+    // Should return the second-level timer (sooner than hour-level)
+    assert!(
+        deadline < Duration::from_secs(60),
+        "Should return s-level timer deadline, got {:?}",
+        deadline
+    );
+}
+
+#[test]
+fn test_next_deadline_all_three_levels() {
+    let mut wheel = TimeWheel::new();
+    let (_, waker) = make_waker();
+
+    // Add timers at all three levels
+    wheel.init_timer(Duration::from_secs(7200), &waker).unwrap(); // hour level
+    wheel
+        .init_timer(Duration::from_millis(500), &waker)
+        .unwrap(); // second level
+    wheel.init_timer(Duration::from_millis(50), &waker).unwrap(); // ms level
+
+    let deadline = wheel.next_deadline().unwrap();
+    // Should return the ms-level timer
+    assert!(
+        deadline <= Duration::from_millis(60),
+        "Should return ms-level timer deadline, got {:?}",
+        deadline
+    );
+}
+
+#[test]
+fn test_next_deadline_after_ms_level_cleared() {
+    let mut wheel = TimeWheel::new();
+    let (_, waker) = make_waker();
+
+    // Add timer at ms level and s level
+    wheel.init_timer(Duration::from_millis(20), &waker).unwrap();
+    wheel
+        .init_timer(Duration::from_millis(500), &waker)
+        .unwrap();
+
+    // Fire the ms-level timer
+    sleep(Duration::from_millis(30));
+    wheel.tick();
+
+    // Now next_deadline should point to the s-level timer
+    let deadline = wheel.next_deadline();
+    assert!(
+        deadline.is_some(),
+        "Should have deadline from s-level timer"
+    );
+}
+
+#[test]
+fn test_next_deadline_exact_bucket_boundaries() {
+    let mut wheel = TimeWheel::new();
+    let (_, waker) = make_waker();
+
+    // Timer exactly at 10ms (one tick)
+    wheel.init_timer(Duration::from_millis(10), &waker).unwrap();
+
+    let deadline = wheel.next_deadline().unwrap();
+    assert_eq!(
+        deadline,
+        Duration::from_millis(10),
+        "Deadline should be exactly 10ms"
+    );
+}
+
+#[test]
+fn test_next_deadline_multiple_same_bucket() {
+    let mut wheel = TimeWheel::new();
+    let (_, waker) = make_waker();
+
+    // Multiple timers in the same bucket (20ms and 25ms both round to same 10ms bucket)
+    wheel.init_timer(Duration::from_millis(20), &waker).unwrap();
+    wheel.init_timer(Duration::from_millis(25), &waker).unwrap();
+    wheel.init_timer(Duration::from_millis(28), &waker).unwrap();
+
+    let deadline = wheel.next_deadline().unwrap();
+    // All go into the bucket at offset 2 (20ms)
+    assert!(
+        deadline <= Duration::from_millis(30),
+        "Deadline should reflect the bucket, got {:?}",
+        deadline
+    );
+}
+
+#[test]
+fn test_next_deadline_cancelled_timer_still_in_bucket() {
+    let mut wheel = TimeWheel::new();
+    let (_, waker) = make_waker();
+
+    let id = wheel.init_timer(Duration::from_millis(30), &waker).unwrap();
+
+    // Cancel the timer
+    wheel.drop(id);
+
+    // next_deadline still sees the occupied bucket (timer is cancelled but bucket bit is set)
+    // This documents current behavior - the occupied bit isn't cleared on cancel
+    let deadline = wheel.next_deadline();
+    // Note: This may return Some even though timer is cancelled, since we don't
+    // clear the bucket occupied bit on cancel
+    assert!(
+        deadline.is_some(),
+        "Bucket occupied bit should still be set after cancel"
+    );
+}
