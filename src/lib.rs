@@ -235,8 +235,8 @@ impl TimeWheel {
         for i in 0..MS_BUCKETS {
             let idx = (self.current_ms_idx + i) % MS_BUCKETS;
             if self.buckets.ms_occupied.is_set(idx) {
-                let ticks_away = if i == 0 { 0 } else { i };
-                return Some(Duration::from_millis(ticks_away as u64 * MS_TICK));
+                let ticks_away = if i == 0 { None } else { Some(i) };
+                return ticks_away.map(|v| Duration::from_millis(v as u64 * MS_TICK));
             }
         }
 
