@@ -17,7 +17,7 @@ impl TimerStorage {
     }
 
     pub(crate) fn drop(&mut self, id: usize) {
-        let timer = unsafe { self.inner.get_mut(id).unwrap() };
+        let timer = self.inner.get_mut(id).unwrap();
         match timer {
             Timer::Waiting(_) => {
                 *timer = Timer::Cancelled;
@@ -37,16 +37,13 @@ impl TimerStorage {
             }
             return std::task::Poll::Pending;
         }
-        self.inner.remove(id);
         std::task::Poll::Ready(())
     }
 
     pub(crate) fn wake(&mut self, id: usize) {
-        println!("wake func");
         let timer = self.inner.get_mut(id).unwrap();
         match timer {
             Timer::Waiting(waker) => {
-                println!("WAKING!!");
                 waker.wake_by_ref();
                 *timer = Timer::Done;
                 return;
